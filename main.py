@@ -10,7 +10,10 @@ from sqlalchemy.pool import QueuePool
 # ---------------------------
 # Config
 # ---------------------------
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Get the original database URL from Render
+db_url = os.getenv("DATABASE_URL")
+# Modify it to explicitly use the 'psycopg' driver
+DATABASE_URL = db_url.replace("postgresql://", "postgresql+psycopg://", 1) if db_url else None
 TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH")
 TWILIO_NUMBER = os.getenv("TWILIO_NUMBER")
@@ -203,3 +206,4 @@ def thank_you(order_id: str):
         <p>Thank you!</p>
     </div></body></html>
     """
+
