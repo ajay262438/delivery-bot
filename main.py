@@ -114,7 +114,7 @@ def create_delivery(payload: DeliveryCreate):
 
     # 🔔 Send SMS to customer with location-sharing link
     SERVER_URL = os.getenv("SERVER_URL")  # update
-    message = f"Your parcel has been received!\nOrder ID: {row['order_id']}\nPlease share your location: {SERVER_URL}"
+    message = f"Your parcel has been received!\nOrder ID: {row['order_id']}\nPlease share your location: {SERVER_URL}/share/{row['order_id']}"
     send_sms(row["customer_contact"], message)
 
     return {
@@ -271,6 +271,7 @@ def thank_you(order_id: str):
     </body>
     </html>
     """
+
 
 
 
