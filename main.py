@@ -9,14 +9,30 @@ import sqlalchemy
 # ---------------------------
 # Config
 # ---------------------------
+print("--- SCRIPT STARTING ---")
+
 DATABASE_URL = os.getenv("DATABASE_URL")
+print(f"--- Step 1: DATABASE_URL found: {DATABASE_URL is not None} ---")
+
+if not DATABASE_URL:
+    print("--- FATAL: DATABASE_URL environment variable is MISSING ---")
+    raise ValueError("FATAL ERROR: DATABASE_URL environment variable is not set.")
+
 TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH")
 TWILIO_NUMBER = os.getenv("TWILIO_NUMBER")
+print("--- Step 2: Twilio credentials loaded ---")
 
-app = FastAPI(title="Delivery Bot Backend", version="1.3.0") # Version updated
-engine = sqlalchemy.create_engine(DATABASE_URL)
+app = FastAPI(title="Delivery Bot Backend", version="1.4.0")
+print("--- Step 3: FastAPI app created ---")
 
+try:
+    engine = sqlalchemy.create_engine(DATABASE_URL)
+    print("--- Step 4: SQLAlchemy engine created successfully ---")
+except Exception as e:
+    print(f"--- FATAL: FAILED TO CREATE SQLALCHEMY ENGINE ---")
+    print(f"--- ERROR DETAILS: {e} ---")
+    raise
 # ---------------------------
 # DB helpers
 # ---------------------------
@@ -41,7 +57,9 @@ def _conn():
 
 @app.on_event("startup")
 def on_startup():
+    print("--- Step 5: FastAPI startup event triggered. Running _ensure_db... ---")
     _ensure_db()
+    print("--- Step 6: _ensure_db function completed successfully. App is ready! ---")
 
 # ---------------------------
 # Schemas
@@ -263,4 +281,5 @@ def thank_you(order_id: str):
     </body>
     </html>
     """
+
 
