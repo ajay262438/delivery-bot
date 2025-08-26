@@ -80,8 +80,22 @@ def send_sms(to_number: str, message: str):
 # ---------------------------
 @app.get("/")
 def root():
-    return {"message": "Delivery Bot Backend + PostgreSQL + Twilio SMS Running 🚀"}
+    """A debug endpoint to check the status of environment variables."""
+    db_url_status = "✅ SET" if os.getenv("DATABASE_URL") else "❌ MISSING"
+    twilio_sid_status = "✅ SET" if os.getenv("TWILIO_SID") else "❌ MISSING"
+    twilio_auth_status = "✅ SET" if os.getenv("TWILIO_AUTH") else "❌ MISSING"
+    twilio_number_status = "✅ SET" if os.getenv("TWILIO_NUMBER") else "❌ MISSING"
+    server_url_status = "✅ SET" if os.getenv("SERVER_URL") else "❌ MISSING"
 
+    return {
+        "service_status": "Running",
+        "message": "Checking environment variable configuration...",
+        "database_url_is_set": db_url_status,
+        "server_url_is_set": server_url_status,
+        "twilio_sid_is_set": twilio_sid_status,
+        "twilio_auth_is_set": twilio_auth_status,
+        "twilio_number_is_set": twilio_number_status
+    }
 @app.post("/create_delivery")
 def create_delivery(payload: DeliveryCreate):
     now = datetime.utcnow().isoformat()
@@ -217,3 +231,4 @@ def thank_you(order_id: str):
         <p>Thank you!</p>
     </div></body></html>
     """
+
