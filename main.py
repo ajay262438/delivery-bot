@@ -12,9 +12,9 @@ from twilio.rest import Client
 DB_PATH = os.getenv("DB_PATH", "database/deliveries.db")
 
 # Twilio Credentials (use env vars for safety, hardcoded here for testing)
-TWILIO_SID = os.getenv("TWILIO_SID", "SID")
-TWILIO_AUTH = os.getenv("TWILIO_AUTH", "AUTH")
-TWILIO_NUMBER = os.getenv("TWILIO_NUMBER", "NO")  # your Twilio phone number
+TWILIO_SID = os.getenv("TWILIO_SID")
+TWILIO_AUTH = os.getenv("TWILIO_AUTH")
+TWILIO_NUMBER = os.getenv("TWILIO_NUMBER")  # your Twilio phone number
 
 app = FastAPI(title="Delivery Bot Backend", version="1.1.0")
 
@@ -241,4 +241,5 @@ def thank_you(order_id: str):
     </body>
     </html>
     """
+
 
