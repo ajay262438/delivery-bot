@@ -5,6 +5,7 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 from twilio.rest import Client
 import sqlalchemy
+from sqlalchemy.pool import QueuePool
 
 # ---------------------------
 # Config
@@ -14,36 +15,42 @@ TWILIO_SID = os.getenv("TWILIO_SID")
 TWILIO_AUTH = os.getenv("TWILIO_AUTH")
 TWILIO_NUMBER = os.getenv("TWILIO_NUMBER")
 
-app = FastAPI(title="Delivery Bot Backend", version="1.5.0") # Final Version
-engine = sqlalchemy.create_engine(DATABASE_URL)
+# --- THE FIX: Use a connection pool ---
+# This creates a managed pool of connections that handles timeouts and reconnects.
+engine = sqlalchemy.create_engine(
+    DATABASE_URL,
+    poolclass=QueuePool,
+    pool_size=5,
+    max_overflow=10,
+    pool_timeout=30,
+    pool_recycle=1800 # Recycle connections every 30 minutes
+)
+
+app = FastAPI(title="Delivery Bot Backend", version="2.0.0") # Production Version
 
 # ---------------------------
 # DB helpers
 # ---------------------------
-def _ensure_db():
-    """Use SQLAlchemy to create the table if it doesn't exist."""
-    metadata = sqlalchemy.MetaData()
-    sqlalchemy.Table('deliveries', metadata,
-        sqlalchemy.Column('id', sqlalchemy.Integer, primary_key=True),
-        sqlalchemy.Column('order_id', sqlalchemy.String, unique=True, index=True),
-        sqlalchemy.Column('pickup_location', sqlalchemy.String),
-        sqlalchemy.Column('drop_location', sqlalchemy.String),
-        sqlalchemy.Column('customer_contact', sqlalchemy.String),
-        sqlalchemy.Column('status', sqlalchemy.String),
-        sqlalchemy.Column('target_lat', sqlalchemy.Float),
-        sqlalchemy.Column('target_lon', sqlalchemy.Float),
-        sqlalchemy.Column('created_at', sqlalchemy.String),
-        sqlalchemy.Column('updated_at', sqlalchemy.String),
-    )
-    metadata.create_all(engine)
-
-def _conn():
-    """Get a connection from the SQLAlchemy engine pool."""
-    return engine.connect()
+metadata = sqlalchemy.MetaData()
+deliveries_table = sqlalchemy.Table('deliveries', metadata,
+    sqlalchemy.Column('id', sqlalchemy.Integer, primary_key=True),
+    sqlalchemy.Column('order_id', sqlalchemy.String, unique=True, index=True),
+    sqlalchemy.Column('pickup_location', sqlalchemy.String),
+    sqlalchemy.Column('drop_location', sqlalchemy.String),
+    sqlalchemy.Column('customer_contact', sqlalchemy.String),
+    sqlalchemy.Column('status', sqlalchemy.String),
+    sqlalchemy.Column('target_lat', sqlalchemy.Float),
+    sqlalchemy.Column('target_lon', sqlalchemy.Float),
+    sqlalchemy.Column('created_at', sqlalchemy.String),
+    sqlalchemy.Column('updated_at', sqlalchemy.String),
+)
 
 @app.on_event("startup")
 def on_startup():
-    _ensure_db()
+    """Create the table on startup if it doesn't exist."""
+    with engine.connect() as connection:
+        metadata.create_all(connection)
+        connection.commit() # Commit after table creation
 
 # ---------------------------
 # Schemas
@@ -62,7 +69,6 @@ class LocationUpdate(BaseModel):
 # SMS Helper (Twilio)
 # ---------------------------
 def send_sms(to_number: str, message: str):
-    """Send SMS using Twilio API."""
     if not all([TWILIO_SID, TWILIO_AUTH, TWILIO_NUMBER]):
         print("❌ SMS Error: Twilio credentials are not fully configured.")
         return False
@@ -80,29 +86,13 @@ def send_sms(to_number: str, message: str):
 # ---------------------------
 @app.get("/")
 def root():
-    """A debug endpoint to check the status of environment variables."""
-    db_url_status = "✅ SET" if os.getenv("DATABASE_URL") else "❌ MISSING"
-    twilio_sid_status = "✅ SET" if os.getenv("TWILIO_SID") else "❌ MISSING"
-    twilio_auth_status = "✅ SET" if os.getenv("TWILIO_AUTH") else "❌ MISSING"
-    twilio_number_status = "✅ SET" if os.getenv("TWILIO_NUMBER") else "❌ MISSING"
-    server_url_status = "✅ SET" if os.getenv("SERVER_URL") else "❌ MISSING"
+    return {"service_status": "Running", "database_engine_status": "Initialized"}
 
-    return {
-        "service_status": "Running",
-        "message": "Checking environment variable configuration...",
-        "database_url_is_set": db_url_status,
-        "server_url_is_set": server_url_status,
-        "twilio_sid_is_set": twilio_sid_status,
-        "twilio_auth_is_set": twilio_auth_status,
-        "twilio_number_is_set": twilio_number_status
-    }
 @app.post("/create_delivery")
 def create_delivery(payload: DeliveryCreate):
     now = datetime.utcnow().isoformat()
     order_data = {}
-
-    with _conn() as c:
-        # PostgreSQL's ON CONFLICT requires specifying the constraint column
+    with engine.connect() as connection:
         query = sqlalchemy.text("""
             INSERT INTO deliveries (order_id, pickup_location, drop_location, customer_contact, status, created_at, updated_at)
             VALUES (:order_id, :pickup_location, :drop_location, :customer_contact, 'created', :now, :now)
@@ -112,18 +102,16 @@ def create_delivery(payload: DeliveryCreate):
                 customer_contact=excluded.customer_contact,
                 updated_at=excluded.updated_at
         """)
-        c.execute(query, {
+        connection.execute(query, {
             "order_id": payload.order_id, "pickup_location": payload.pickup_location,
             "drop_location": payload.drop_location, "customer_contact": payload.customer_contact,
             "now": now
         })
-        
-        result_proxy = c.execute(sqlalchemy.text("SELECT * FROM deliveries WHERE order_id = :order_id"), {"order_id": payload.order_id})
+        result_proxy = connection.execute(sqlalchemy.text("SELECT * FROM deliveries WHERE order_id = :order_id"), {"order_id": payload.order_id})
         row = result_proxy.fetchone()
-        
         if row:
             order_data = dict(row._mapping)
-        c.commit()
+        connection.commit()
 
     if not order_data:
         raise HTTPException(status_code=500, detail="Failed to retrieve order after creation.")
@@ -131,30 +119,29 @@ def create_delivery(payload: DeliveryCreate):
     SERVER_URL = os.getenv("SERVER_URL")
     message = f"Your parcel has been received!\nOrder ID: {order_data['order_id']}\nPlease share your location: {SERVER_URL}/share/{order_data['order_id']}"
     send_sms(order_data["customer_contact"], message)
-
     return { "status": "success", "message": "Delivery task created ✅ & SMS sent", **order_data }
 
 @app.get("/deliveries")
 def list_deliveries():
-    with _conn() as c:
+    with engine.connect() as connection:
         query = sqlalchemy.text("SELECT * FROM deliveries ORDER BY id DESC")
-        rows = c.execute(query).fetchall()
+        rows = connection.execute(query).fetchall()
     return [dict(r._mapping) for r in rows]
 
 @app.get("/deliveries/{order_id}")
 def get_delivery(order_id: str):
-    with _conn() as c:
+    with engine.connect() as connection:
         query = sqlalchemy.text("SELECT * FROM deliveries WHERE order_id = :order_id")
-        row = c.execute(query, {"order_id": order_id}).fetchone()
+        row = connection.execute(query, {"order_id": order_id}).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="order not found")
     return dict(row._mapping)
 
 @app.post("/deliveries/{order_id}/location")
 def set_target_location(order_id: str, loc: LocationUpdate):
-    with _conn() as c:
+    with engine.connect() as connection:
         get_query = sqlalchemy.text("SELECT customer_contact FROM deliveries WHERE order_id = :order_id")
-        row = c.execute(get_query, {"order_id": order_id}).fetchone()
+        row = connection.execute(get_query, {"order_id": order_id}).fetchone()
         if not row:
             raise HTTPException(status_code=404, detail="order not found")
         customer_contact = row._mapping["customer_contact"]
@@ -163,44 +150,29 @@ def set_target_location(order_id: str, loc: LocationUpdate):
             UPDATE deliveries SET target_lat=:lat, target_lon=:lon, status='location_received', updated_at=:now
             WHERE order_id=:order_id
         """)
-        c.execute(update_query, {"lat": loc.lat, "lon": loc.lon, "now": datetime.utcnow().isoformat(), "order_id": order_id})
-        c.commit()
+        connection.execute(update_query, {"lat": loc.lat, "lon": loc.lon, "now": datetime.utcnow().isoformat(), "order_id": order_id})
+        connection.commit()
 
     message = f"✅ Delivery Bot received your location! Order ID: {order_id}"
     send_sms(customer_contact, message)
     return {"status": "ok", "order_id": order_id, "lat": loc.lat, "lon": loc.lon, "current_status": "location_received"}
 
-@app.post("/deliveries/{order_id}/status/{new_status}")
-def update_status(order_id: str, new_status: str):
-    with _conn() as c:
-        get_query = sqlalchemy.text("SELECT customer_contact FROM deliveries WHERE order_id = :order_id")
-        row = c.execute(get_query, {"order_id": order_id}).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="order not found")
-        customer_contact = row._mapping["customer_contact"]
-
-        update_query = sqlalchemy.text("UPDATE deliveries SET status=:status, updated_at=:now WHERE order_id=:order_id")
-        c.execute(update_query, {"status": new_status, "now": datetime.utcnow().isoformat(), "order_id": order_id})
-        c.commit()
-
-    if new_status == "completed":
-        send_sms(customer_contact, f"✅ Your parcel (Order {order_id}) has been delivered!")
-    elif new_status == "failed":
-        send_sms(customer_contact, f"⚠️ Delivery failed for Order {order_id}. Please contact support.")
-    return {"status": "ok", "order_id": order_id, "current_status": new_status}
-
-# --- HTML pages (No changes needed below this line) ---
+# --- HTML pages ---
 @app.get("/share/{order_id}", response_class=HTMLResponse)
 def share_page(order_id: str):
+    # We add a check to ensure the order exists before showing the page
+    with engine.connect() as connection:
+        query = sqlalchemy.text("SELECT id FROM deliveries WHERE order_id = :order_id")
+        result = connection.execute(query, {"order_id": order_id}).fetchone()
+        if not result:
+            return "<html><body><h2>Order Not Found</h2><p>The order ID in your link is invalid or has expired.</p></body></html>"
+
     return f"""
     <html><head><title>Share Location</title><meta name="viewport" content="width=device-width, initial-scale=1.0"></head><body>
         <h2>📦 Sharing Location for Order {order_id}...</h2><p id="status">⏳ Requesting your location...</p>
         <script>
         window.onload = function() {{
-            if (!navigator.geolocation) {{
-                document.getElementById('status').innerText = "❌ Geolocation not supported by this browser.";
-                return;
-            }}
+            if (!navigator.geolocation) {{ document.getElementById('status').innerText = "❌ Geolocation not supported."; return; }}
             navigator.geolocation.getCurrentPosition(function(pos) {{
                 fetch('/deliveries/{order_id}/location', {{
                     method: 'POST',
@@ -231,4 +203,3 @@ def thank_you(order_id: str):
         <p>Thank you!</p>
     </div></body></html>
     """
-
