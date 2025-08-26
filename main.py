@@ -234,12 +234,43 @@ def share_page(order_id: str):
 def thank_you(order_id: str):
     return f"""
     <html>
-    <head><title>Thank You</title></head>
+    <head>
+        <title>Location Received!</title>
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <style>
+            body {{ 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                text-align: center; 
+                padding: 40px 20px; 
+                background-color: #f4f7f6;
+                color: #333;
+            }}
+            h2 {{ 
+                color: #28a745; /* A nice green color */
+            }}
+            p {{ 
+                font-size: 1.1em; 
+                line-height: 1.6;
+            }}
+            .container {{
+                max-width: 600px;
+                margin: 0 auto;
+                background-color: #ffffff;
+                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            }}
+        </style>
+    </head>
     <body>
-        <h2>🙏 Thank you!</h2>
-        <p>Your location for Order <b>{order_id}</b> was shared successfully. 🚀</p>
+        <div class="container">
+            <h2>✅ Location Received!</h2>
+            <p>The delivery bot has your location for Order <b>{order_id}</b> and is on the way to deliver your goods.</p>
+            <p>Thank you!</p>
+        </div>
     </body>
     </html>
     """
+
 
 
