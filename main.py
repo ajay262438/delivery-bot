@@ -80,7 +80,8 @@ def root():
 @app.post("/create_delivery")
 def create_delivery(payload: DeliveryCreate):
     now = datetime.utcnow().isoformat()
-    
+    order_data = {} # Create an empty dictionary to hold our data
+
     with _conn() as c:
         query = sqlalchemy.text("""
             INSERT INTO deliveries (order_id, pickup_location, drop_location, customer_contact, status, created_at, updated_at)
@@ -101,25 +102,33 @@ def create_delivery(payload: DeliveryCreate):
         
         result_proxy = c.execute(sqlalchemy.text("SELECT * FROM deliveries WHERE order_id = :order_id"), {"order_id": payload.order_id})
         row = result_proxy.fetchone()
+        
+        # This is the crucial change: copy the data while the connection is open
+        if row:
+            order_data = dict(row._mapping)
+
         c.commit()
 
+    # Now we use the 'order_data' dictionary, which is safe to access
+    if not order_data:
+        raise HTTPException(status_code=500, detail="Failed to retrieve order after creation.")
+
     SERVER_URL = os.getenv("SERVER_URL")
-    message = f"Your parcel has been received!\nOrder ID: {row._mapping['order_id']}\nPlease share your location: {SERVER_URL}/share/{row._mapping['order_id']}"
-    send_sms(row._mapping["customer_contact"], message)
+    message = f"Your parcel has been received!\nOrder ID: {order_data['order_id']}\nPlease share your location: {SERVER_URL}/share/{order_data['order_id']}"
+    send_sms(order_data["customer_contact"], message)
 
     return {
         "status": "success",
         "message": "Delivery task created ✅ & SMS sent",
-        "order_id": row._mapping["order_id"],
-        "pickup": row._mapping["pickup_location"],
-        "drop": row._mapping["drop_location"],
-        "customer_contact": row._mapping["customer_contact"],
-        "db_id": row._mapping["id"],
-        "current_status": row._mapping["status"],
-        "created_at": row._mapping["created_at"],
-        "updated_at": row._mapping["updated_at"],
+        "order_id": order_data["order_id"],
+        "pickup": order_data["pickup_location"],
+        "drop": order_data["drop_location"],
+        "customer_contact": order_data["customer_contact"],
+        "db_id": order_data["id"],
+        "current_status": order_data["status"],
+        "created_at": order_data["created_at"],
+        "updated_at": order_data["updated_at"],
     }
-
 @app.get("/deliveries")
 def list_deliveries():
     with _conn() as c:
@@ -254,3 +263,4 @@ def thank_you(order_id: str):
     </body>
     </html>
     """
+
