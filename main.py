@@ -113,7 +113,7 @@ def create_delivery(payload: DeliveryCreate):
         row = c.execute("SELECT * FROM deliveries WHERE order_id=?", (payload.order_id,)).fetchone()
 
     # 🔔 Send SMS to customer with location-sharing link
-    SERVER_URL = os.getenv("SERVER_URL")  # update every time ngrok restarts
+    SERVER_URL = os.getenv("SERVER_URL")  # update
     message = f"Your parcel has been received!\nOrder ID: {row['order_id']}\nPlease share your location: {SERVER_URL}"
     send_sms(row["customer_contact"], message)
 
@@ -241,3 +241,4 @@ def thank_you(order_id: str):
     </body>
     </html>
     """
+
